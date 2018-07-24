@@ -51,6 +51,7 @@ function loadStories() {
   require("./stories/pages/PageProperties");
 
   // Products
+  require("./stories/products/ProductCreatePage");
   require("./stories/products/ProductImagePage");
   require("./stories/products/ProductListCard");
   require("./stories/products/ProductUpdatePage");
