@@ -3,13 +3,25 @@ from django.contrib.auth.tokens import default_token_generator
 
 from ...account import models
 from ...core.permissions import MODELS_PERMISSIONS, get_permissions
+from ..account.types import AddressInput
 from ..core.mutations import ModelMutation
+
+
+BILLING_ADDRESS_FIELD = 'default_billing_address'
+SHIPPING_ADDRESS_FIELD = 'default_shipping_address'
 
 
 class UserInput(graphene.InputObjectType):
     email = graphene.String(
         description='The unique email address of the user.')
     note = graphene.String(description='A note about the user.')
+
+
+class CustomerInput(UserInput):
+    default_billing_address = AddressInput(
+        description='Billing address of the customer.')
+    default_shipping_address = AddressInput(
+        description='Shipping address of the customer.')
 
 
 class StaffInput(UserInput):
@@ -23,7 +35,7 @@ class StaffInput(UserInput):
 
 class CustomerCreate(ModelMutation):
     class Arguments:
-        input = UserInput(
+        input = CustomerInput(
             description='Fields required to create a customer.', required=True)
 
     class Meta:
@@ -35,12 +47,58 @@ class CustomerCreate(ModelMutation):
     def user_is_allowed(cls, user, input):
         return user.has_perm('account.edit_user')
 
+    @classmethod
+    def construct_address(
+            cls, address_field_name, address_input, user_instance, errors):
+        if not address_field_name in [
+                BILLING_ADDRESS_FIELD, SHIPPING_ADDRESS_FIELD]:
+            raise AssertionError(
+                'Wrong address_field_name: %s' % address_field_name)
+
+        address_instance = getattr(user_instance, address_field_name)
+        if not address_instance:
+            address_instance = models.Address()
+
+        cls.construct_instance(address_instance, address_input)
+        cls.clean_instance(address_instance, errors)
+        return address_instance
+
+    @classmethod
+    def clean_input(cls, info, instance, input, errors):
+        shipping_address_input = input.pop(SHIPPING_ADDRESS_FIELD, None)
+        billing_address_input = input.pop(BILLING_ADDRESS_FIELD, None)
+        cleaned_input = super().clean_input(info, instance, input, errors)
+
+        if shipping_address_input:
+            shipping_address = cls.construct_address(
+                SHIPPING_ADDRESS_FIELD, shipping_address_input, instance, errors)
+            cleaned_input[SHIPPING_ADDRESS_FIELD] = shipping_address
+
+        if billing_address_input:
+            billing_address = cls.construct_address(
+                BILLING_ADDRESS_FIELD, billing_address_input, instance, errors)
+            cleaned_input[BILLING_ADDRESS_FIELD] = billing_address
+
+        return cleaned_input
+
+    @classmethod
+    def save(cls, info, instance, cleaned_input):
+        default_shipping_address = cleaned_input.get(SHIPPING_ADDRESS_FIELD)
+        if default_shipping_address:
+            default_shipping_address.save()
+            instance.default_shipping_address = default_shipping_address
+        default_billing_address = cleaned_input.get(BILLING_ADDRESS_FIELD)
+        if default_billing_address:
+            default_billing_address.save()
+            instance.default_billing_address = default_billing_address
+        super().save(info, instance, cleaned_input)
+
 
 class CustomerUpdate(CustomerCreate):
     class Arguments:
         id = graphene.ID(
             description='ID of a customer to update.', required=True)
-        input = UserInput(
+        input = CustomerInput(
             description='Fields required to update a customer.', required=True)
 
     class Meta:
